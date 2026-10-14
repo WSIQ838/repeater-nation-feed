@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { restoreSession, loginWithPassword, clearSession, isAdmin, listZonesAndChannels, feedMine, feedRequest } from "./lib/auth";
+import { restoreSession, restoreSessionFromRedirect, restoreSessionFromLink, loginWithPassword, loginWithGoogle, clearSession, isAdmin, listZonesAndChannels, feedMine, feedRequest } from "./lib/auth";
+import { useUpdate, openLink } from "./lib/updates";
 import { FeedPublisher } from "./lib/publisher";
 
 const PREFS = "feed-prefs";
 const loadPrefs = () => { try { return JSON.parse(localStorage.getItem(PREFS) || "{}"); } catch { return {}; } };
 const savePrefs = (p) => { try { localStorage.setItem(PREFS, JSON.stringify(p)); } catch { /* storage unavailable */ } };
 
-function Login({ onDone }) {
+function Login({ onDone, note }) {
   const [email, setEmail] = useState(""), [password, setPassword] = useState(""), [err, setErr] = useState(""), [busy, setBusy] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); setBusy(true); setErr("");
@@ -16,11 +17,12 @@ function Login({ onDone }) {
   return (
     <form className="card login" onSubmit={submit}>
       <h1>Repeater Nation Feed</h1>
-      <p>Sign in with your Repeater Nation account. Admins can connect a feed to any listen-only channel; other members ask for a stream channel and connect to it once control approves.</p>
+      <p>Sign in with your Repeater Nation account (email and password, or Google). Admins can connect a feed to any listen-only channel; other members ask for a stream channel and connect to it once control approves.</p>
       <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
       <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-      {err && <p className="err">{err}</p>}
+      {(err || note) && <p className="err">{err || note}</p>}
       <button disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+      <button type="button" onClick={() => loginWithGoogle().catch((x) => setErr(x?.message || "Could not open the browser."))}>Sign in with Google</button>
     </form>
   );
 }
@@ -50,6 +52,7 @@ function Requests({ mine, reload }) {
 }
 
 function Feed({ member, onSignOut }) {
+  const upd = useUpdate();
   const [prefs, setPrefsState] = useState(() => ({ channelId: "", deviceId: "", mode: "squelch", threshold: 0.03, hangMs: 1500, autoStart: false, ...loadPrefs() }));
   const [channels, setChannels] = useState([]);
   const [mine, setMine] = useState(null);
@@ -111,6 +114,7 @@ function Feed({ member, onSignOut }) {
       <header>
         <span className="logo" aria-hidden="true">RN</span>
         <strong>Repeater Nation Feed</strong>
+        {upd.update?.available && <button className="upd" onClick={() => openLink(upd.update.download)}>Update to {upd.update.latest}</button>}
         <span className="user">{member.full_name || member.email}</span>
         <button onClick={async () => { await stop(); await clearSession(); onSignOut(); }}>Sign out</button>
       </header>
@@ -169,7 +173,15 @@ function Feed({ member, onSignOut }) {
           <button className={"go" + (running ? " on" : "")} disabled={!channel && !running} onClick={running ? stop : start}>{running ? "Stop" : "Start the feed"}</button>
           <p className={"status" + (air ? " air" : "")}>{status}</p>
           <label className="check"><input type="checkbox" checked={!!prefs.autoStart} onChange={(e) => setPrefs({ autoStart: e.target.checked })} /> Start by itself when this app opens</label>
-          <small>Version {__APP_VERSION__}</small>
+          <small>Version {__APP_VERSION__}
+            {upd.update && !upd.update.available && " · up to date"}
+            {upd.update?.available && ` · ${upd.update.latest} is available`}
+            {upd.error && ` · ${upd.error}`}
+          </small>
+          <div className="updrow">
+            <button disabled={upd.checking} onClick={upd.check}>{upd.checking ? "Checking…" : "Check for updates"}</button>
+            {upd.update?.available && <button className="upd" onClick={() => openLink(upd.update.download)}>Download {upd.update.latest}</button>}
+          </div>
         </section>
       </main>
     </div>
@@ -178,8 +190,25 @@ function Feed({ member, onSignOut }) {
 
 export default function App() {
   const [session, setSession] = useState(undefined);
-  useEffect(() => { restoreSession().then((s) => setSession(s)).catch(() => setSession(null)); }, []);
+  const [note, setNote] = useState("");
+  useEffect(() => { restoreSessionFromRedirect().then((r) => r || restoreSession()).then((s) => setSession(s)).catch(() => setSession(null)); }, []);
+  // Desktop app: the browser hands Google sign-in back through a repeaternation-feed:// link.
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    let off = null, gone = false;
+    const handle = (urls) => {
+      const url = (urls || []).find((u) => u.startsWith("repeaternation-feed://"));
+      if (!url) return;
+      restoreSessionFromLink(url).then(setSession).catch((e) => setNote(e?.message || "Could not finish signing in."));
+    };
+    import("@tauri-apps/plugin-deep-link").then(async (dl) => {
+      const unlisten = await dl.onOpenUrl(handle);
+      if (gone) unlisten(); else off = unlisten;
+      handle(await dl.getCurrent().catch(() => null));
+    }).catch((e) => setNote("This build can't receive sign-in links: " + (e?.message || e)));
+    return () => { gone = true; off?.(); };
+  }, []);
   if (session === undefined) return <p className="center">Loading…</p>;
-  if (!session) return <Login onDone={setSession} />;
+  if (!session) return <Login onDone={setSession} note={note} />;
   return <Feed member={session.member} onSignOut={() => setSession(null)} />;
 }

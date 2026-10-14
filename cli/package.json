@@ -1,6 +1,6 @@
 {
   "name": "repeater-nation-feed-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Streams a sound card or an SDR into a Repeater Nation stream channel (headless, for a Raspberry Pi or any always-on computer)",
   "bin": { "repeater-nation-feed": "feed-cli.mjs" },

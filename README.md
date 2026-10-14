@@ -38,5 +38,5 @@ The tool prints the input level every ten seconds so you can pick a squelch leve
 ## Notes
 
 - Feed connections are made by the server (`radio-feed`) and last 24 hours; the app and the command line renew them on their own.
-- Sign-in is by email and password. If your own account uses Google sign-in, make a separate account for feeds.
+- The desktop app signs in with email and password or with Google. The command line version uses email and password only; if your own account uses Google sign-in, make a separate account for feeds.
 - Not yet tested against the live server or with real hardware.
