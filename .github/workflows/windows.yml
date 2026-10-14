@@ -1,0 +1,34 @@
+name: Build Repeater Nation Feed for Windows
+
+# Manual only. Publishes the release feed-v<version> with the Windows installer.
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm test
+      - name: Build Windows installer and publish the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tagName: feed-v__VERSION__
+          releaseName: Repeater Nation Feed v__VERSION__
+          releaseBody: |
+            Streams a sound card, line-in or SDR audio into a Repeater Nation stream channel.
+            **Windows:** download the `x64-setup.exe` and run it. **Linux desktop:** the `.AppImage` or `.deb`.
+            **Raspberry Pi / always-on box:** download `repeater-nation-feed-cli.tar.gz` (command line, runs without a screen).
+            Sign in with your Repeater Nation account. Windows may show "Windows protected your PC": click **More info**, then **Run anyway**.
+          releaseDraft: false
+          prerelease: false
+          includeDebug: false

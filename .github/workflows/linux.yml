@@ -1,0 +1,51 @@
+name: Build Repeater Nation Feed for Linux
+
+# Manual only. Adds the Linux desktop packages and the command line tool to feed-v<version>.
+on:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - run: npm install
+      - run: npm test
+      - name: Build the desktop packages
+        run: npm run tauri build -- --bundles appimage,deb
+      - name: Package the command line tool
+        run: |
+          (cd cli && npm run prepare-core)
+          mkdir -p out/repeater-nation-feed-cli
+          cp cli/package.json cli/feed-cli.mjs out/repeater-nation-feed-cli/
+          cp -r cli/core out/repeater-nation-feed-cli/core
+          cp README.md out/repeater-nation-feed-cli/README.md
+          tar -C out -czf out/repeater-nation-feed-cli.tar.gz repeater-nation-feed-cli
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repeater-nation-feed-linux
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+            out/repeater-nation-feed-cli.tar.gz
+          if-no-files-found: error
+      - name: Add the files to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="feed-v$VERSION"
+          for i in $(seq 1 40); do gh release view "$TAG" >/dev/null 2>&1 && break; sleep 30; done
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Repeater Nation Feed v$VERSION" --notes "Audio feed for Repeater Nation stream channels."
+          gh release upload "$TAG" src-tauri/target/release/bundle/appimage/*.AppImage src-tauri/target/release/bundle/deb/*.deb out/repeater-nation-feed-cli.tar.gz --clobber

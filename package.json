@@ -1,0 +1,25 @@
+{
+  "name": "repeater-nation-feed",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node scripts/test.mjs",
+    "tauri": "tauri",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@base44/sdk": "^0.8.52",
+    "@tauri-apps/api": "^2.8.0",
+    "livekit-client": "^2.22.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "vite": "^7.1.7"
+  }
+}
