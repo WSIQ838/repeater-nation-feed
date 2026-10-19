@@ -47,13 +47,24 @@ async function invoke(name, payload) {
   catch (e) { const d = e?.response?.data || e?.data; throw Object.assign(new Error(String(d?.error || d?.message || e.message)), { status: e?.response?.status ?? e?.status }); }
 }
 
+// Signs in. A wrong password stops with a clear message; no network (a Pi that starts before Wi-Fi is up)
+// is tried again every 10 seconds, so the feed can be started at boot.
 async function signIn() {
   const email = args.email || process.env.FEED_EMAIL, password = args.password || process.env.FEED_PASSWORD;
   if (!email || !password) throw new Error("Give --email and --password (or FEED_EMAIL and FEED_PASSWORD).");
-  await client.auth.loginViaEmailPassword(email, password);
-  const me = await client.auth.me();
-  log(`Signed in as ${me.full_name || me.email}`);
-  return me;
+  for (;;) {
+    try {
+      await client.auth.loginViaEmailPassword(email, password);
+      const me = await client.auth.me();
+      log(`Signed in as ${me.full_name || me.email}`);
+      return me;
+    } catch (e) {
+      const status = e?.response?.status ?? e?.status;
+      if (status === 400 || status === 401 || status === 403 || status === 404) throw new Error("The email or password was not accepted. (Accounts that only use Google sign-in need a password set, or use a separate account for feeds.)");
+      log(`Could not sign in (${e?.message || e}). Trying again in 10 seconds…`);
+      await new Promise((r) => setTimeout(r, 10000));
+    }
+  }
 }
 
 async function findChannel(me) {
@@ -92,7 +103,15 @@ const gate = new Gate({ always: !!args.always, threshold: Number(args.threshold)
 let room = null, pub = null, source = null, connecting = false, lastLevelLog = 0, peak = 0;
 
 async function getRoom(channel) {
-  const f = await invoke("radio-feed", { action: "token", channel_id: channel.id, label: channel.name });
+  let f;
+  try { f = await invoke("radio-feed", { action: "token", channel_id: channel.id, label: channel.name }); }
+  catch (e) {
+    // The saved sign-in lapsed (the feed has been running for days): sign in again with the same account and retry.
+    if (e.status !== 401) throw e;
+    log("The sign-in lapsed. Signing in again…");
+    await signIn();
+    f = await invoke("radio-feed", { action: "token", channel_id: channel.id, label: channel.name });
+  }
   if (!f?.token) throw new Error(f?.error || "No feed connection from the server.");
   const r = new Room();
   await r.connect(f.url, f.token, { autoSubscribe: false, dynacast: true });

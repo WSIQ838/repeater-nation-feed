@@ -8,6 +8,12 @@ const loadPrefs = () => { try { return JSON.parse(localStorage.getItem(PREFS) ||
 const savePrefs = (p) => { try { localStorage.setItem(PREFS, JSON.stringify(p)); } catch { /* storage unavailable */ } };
 
 function Login({ onDone, note }) {
+  const [progress, setProgress] = useState("");
+  useEffect(() => {
+    const on = (e) => setProgress(e.detail?.message || "");
+    window.addEventListener("rn-auth-status", on);
+    return () => window.removeEventListener("rn-auth-status", on);
+  }, []);
   const [email, setEmail] = useState(""), [password, setPassword] = useState(""), [err, setErr] = useState(""), [busy, setBusy] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); setBusy(true); setErr("");
@@ -21,6 +27,7 @@ function Login({ onDone, note }) {
       <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
       <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
       {(err || note) && <p className="err">{err || note}</p>}
+      {!err && !note && progress && <p className="muted">{progress}</p>}
       <button disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
       <button type="button" onClick={() => loginWithGoogle().catch((x) => setErr(x?.message || "Could not open the browser."))}>Sign in with Google</button>
     </form>
@@ -191,7 +198,27 @@ function Feed({ member, onSignOut }) {
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [note, setNote] = useState("");
-  useEffect(() => { restoreSessionFromRedirect().then((r) => r || restoreSession()).then((s) => setSession(s)).catch(() => setSession(null)); }, []);
+  const [offline, setOffline] = useState(false);
+  const boot = useCallback(async () => {
+    try {
+      const r = (await restoreSessionFromRedirect()) || (await restoreSession());
+      if (r?.offline) { setOffline(true); return false; }
+      setOffline(false); setSession(r); return true;
+    } catch { setOffline(false); setSession(null); return true; }
+  }, []);
+  // Saved sign-in, with the server unreachable: keep it and try again until it answers.
+  useEffect(() => {
+    let stop = false, timer;
+    const run = async () => { const ok = await boot(); if (!ok && !stop) timer = setTimeout(run, 10000); };
+    run();
+    return () => { stop = true; clearTimeout(timer); };
+  }, [boot]);
+  // A server function refused the sign-in (it lapsed or was ended elsewhere): back to the login screen.
+  useEffect(() => {
+    const expired = async () => { await clearSession(); setSession(null); setNote("Your sign-in expired. Sign in again."); };
+    window.addEventListener("rn-auth-expired", expired);
+    return () => window.removeEventListener("rn-auth-expired", expired);
+  }, []);
   // Desktop app: the browser hands Google sign-in back through a repeaternation-feed:// link.
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) return undefined;
@@ -208,6 +235,7 @@ export default function App() {
     }).catch((e) => setNote("This build can't receive sign-in links: " + (e?.message || e)));
     return () => { gone = true; off?.(); };
   }, []);
+  if (offline) return <div className="center"><p>Can't reach Repeater Nation. Trying again…</p><button onClick={boot}>Try now</button></div>;
   if (session === undefined) return <p className="center">Loading…</p>;
   if (!session) return <Login onDone={setSession} note={note} />;
   return <Feed member={session.member} onSignOut={() => setSession(null)} />;
